@@ -1,0 +1,100 @@
+use crate::base::prelude::*;
+use crate::operator::prelude::*;
+use faer::Col;
+use faer::sparse::Triplet;
+
+#[derive(Default)]
+pub struct OpVecBndDiffusion {
+    // boundary
+    pub bnd_id: usize,
+
+    // vectors
+    pub vel_id: usize,  // velocity (vel); unknown
+
+    // scalars
+    pub visc_id: usize,  // viscosity (mu)
+}
+
+impl OpVecBndDiffusion {
+    pub fn new(vars: &Variables, bnd_id: usize, vel_id: usize, visc_id: usize) -> Result<OpVecBndDiffusion, VFVChemError> {
+        // adds the diffusion term to the control volumes of boundary nodes
+        // d(rho * vel)/dt + div(rho * vel * vel) = -grad(p) + div( mu * ( grad(vel) + grad(vel)^T ) + lam * div(vel) * I ) + fce
+        //                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+        // input checking
+        check_bnd_vecdom(vars, bnd_id, vel_id)?;
+        check_bnd_scldom(vars, bnd_id, visc_id)?;
+
+        // create struct
+        let mut oper = OpVecBndDiffusion::default();
+        oper.bnd_id = bnd_id;
+        oper.vel_id = vel_id;
+        oper.visc_id = visc_id;
+
+        Ok(oper)
+    }
+}
+
+impl OperatorBase for OpVecBndDiffusion {
+    fn apply(&self, vars: &Variables, a_triplet: &mut Vec<Triplet<usize, usize, f64>>, _b_vec: &mut Col<f64>) -> Result<(), VFVChemError> {
+        // int_vol div( mu * grad(vel) ) dV
+        // int_surf mu * grad(vel) . n dA
+        // sum_ngh mu * grad(vel) . n dA
+        //
+        // apply normal derivative
+        // sum_ngh mu_f * (vel_n - vel_v) / dn * dA
+
+        // get objects
+        let bnd = &vars.bnd[self.bnd_id];
+        let dom = &vars.dom[bnd.dom_id];
+        let tet = &vars.tet[bnd.dom_id];
+        let visc_dom = &vars.scldom[self.visc_id];
+
+        // iterate through nodes
+        for idx_v in 0..bnd.num_nds() {
+            // get indices
+            let gnd_v = bnd.nds_gnd[idx_v];
+            let nid_v = dom.nds_nid[&gnd_v];
+            let vid_v = dom.num_pts() + nid_v;
+
+            // get geometry
+            let list_n = &tet.ngh_vid[vid_v];
+            let dist_n = &tet.ngh_dist[vid_v];
+            let face_n = &tet.face_area[vid_v];
+            let skew_n = &tet.face_skew[vid_v];
+
+            // get vertex properties
+            let visc_v = visc_dom.value[vid_v];
+            let (visc_x_v, visc_y_v, visc_z_v) = visc_dom.grad[vid_v];
+
+            // iterate through faces
+            for (loc, &vid_n) in list_n.iter().enumerate() {
+                // get geometry
+                let face = face_n[loc];
+                let dist = dist_n[loc];
+                let (sx, sy, sz) = skew_n[loc];
+
+                // get neighbor properties
+                let visc_n = visc_dom.value[vid_n];
+                let (visc_x_n, visc_y_n, visc_z_n) = visc_dom.grad[vid_n];
+
+                // get face viscosity
+                let visc_m = if visc_v + visc_n != 0.0 { 2.0 * visc_v * visc_n / (visc_v + visc_n) } else { 0.0 };  // harmonic mean
+                let visc_f = visc_m + 0.5 * (sx * (visc_x_v + visc_x_n) + sy * (visc_y_v + visc_y_n) + sz * (visc_z_v + visc_z_n));  // skew correction
+                let visc_f = if visc_f > 0.0 { visc_f } else { visc_m };  // guard against negative viscosity
+
+                // load into matrix
+                let coeff = visc_f * face / dist;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 0, vid_v, self.vel_id, 0, vid_n,  coeff)?;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 0, vid_v, self.vel_id, 0, vid_v, -coeff)?;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 1, vid_v, self.vel_id, 1, vid_n,  coeff)?;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 1, vid_v, self.vel_id, 1, vid_v, -coeff)?;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 2, vid_v, self.vel_id, 2, vid_n,  coeff)?;
+                self.add_vecvec_a(vars, a_triplet, self.vel_id, 2, vid_v, self.vel_id, 2, vid_v, -coeff)?;
+            }
+
+        }
+
+        Ok(())
+    }
+}

@@ -1,0 +1,65 @@
+[package]
+name = "vfvchem_vfvm3d"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+faer = "0.24.0"
+faer_gmres = "0.5.0"
+robust = "1"
+spade = "2"
+thiserror = "1"
+rand = "0.9"
+
+[[example]]
+name = "heat_transient"
+path = "examples/heat/heat_transient.rs"
+
+[[example]]
+name = "heat_threereg"
+path = "examples/heat/heat_threereg.rs"
+
+[[example]]
+name = "heat_analytic"
+path = "examples/heat/heat_analytic.rs"
+
+[[example]]
+name = "mass_cube"
+path = "examples/mass/mass_cube.rs"
+
+[[example]]
+name = "mass_analytic"
+path = "examples/mass/mass_analytic.rs"
+
+[[example]]
+name = "flow_lid"
+path = "examples/flow/flow_lid.rs"
+
+[[example]]
+name = "flow_step"
+path = "examples/flow/flow_step.rs"
+
+[[example]]
+name = "flow_threereg"
+path = "examples/flow/flow_threereg.rs"
+
+[[example]]
+name = "flow_analytic"
+path = "examples/flow/flow_analytic.rs"
+
+[[example]]
+name = "feat_prod"
+path = "examples/features/feat_prod.rs"
+
+[[example]]
+name = "feat_itf"
+path = "examples/features/feat_itf.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev.package.faer]
+opt-level = 3
